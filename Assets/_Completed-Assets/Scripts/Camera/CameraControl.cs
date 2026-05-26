@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 
 namespace Complete
 {
@@ -50,6 +50,10 @@ namespace Complete
             // Go through all the targets and add their positions together.
             for (int i = 0; i < m_Targets.Length; i++)
             {
+                // Guard against destroyed NetworkObjects (online mode despawns GameObjects).
+                if (m_Targets[i] == null)
+                    continue;
+
                 // If the target isn't active, go on to the next one.
                 if (!m_Targets[i].gameObject.activeSelf)
                     continue;
@@ -90,6 +94,10 @@ namespace Complete
             // Go through all the targets...
             for (int i = 0; i < m_Targets.Length; i++)
             {
+                // Guard against destroyed NetworkObjects (online mode despawns GameObjects).
+                if (m_Targets[i] == null)
+                    continue;
+
                 // ... and if they aren't active continue on to the next target.
                 if (!m_Targets[i].gameObject.activeSelf)
                     continue;

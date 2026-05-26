@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using UnityEngine.UI;
 
 namespace Complete
@@ -56,6 +56,19 @@ namespace Complete
             {
                 OnDeath ();
             }
+        }
+
+        /// <summary>Returns true when the tank is alive and at full health.</summary>
+        public bool IsFullHealth => !m_Dead && m_CurrentHealth >= m_StartingHealth;
+
+        /// <summary>Restores health up to the starting maximum.</summary>
+        public void Heal(float amount)
+        {
+            if (m_Dead)
+                return;
+
+            m_CurrentHealth = Mathf.Min(m_StartingHealth, m_CurrentHealth + amount);
+            SetHealthUI();
         }
 
 

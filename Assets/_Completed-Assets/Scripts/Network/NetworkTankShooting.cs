@@ -74,6 +74,9 @@ namespace Complete
             if (m_CurrentLaunchForce >= m_MaxLaunchForce && !m_Fired)
             {
                 m_CurrentLaunchForce = m_MaxLaunchForce;
+                // Set m_Fired immediately on the client so this branch is not
+                // re-entered every frame while waiting for the ServerRpc round-trip.
+                m_Fired = true;
                 RequestFireServerRpc(m_CurrentLaunchForce);
             }
             else if (Input.GetButtonDown(FireButton))
@@ -96,6 +99,7 @@ namespace Complete
             }
             else if (Input.GetButtonUp(FireButton) && !m_Fired)
             {
+                m_Fired = true;
                 RequestFireServerRpc(m_CurrentLaunchForce);
             }
         }

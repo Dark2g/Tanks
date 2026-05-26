@@ -88,6 +88,18 @@ namespace Complete
                 OnDeathServerSide();
         }
 
+        /// <summary>Returns true when the tank is alive and at full health. Safe to read on any peer.</summary>
+        public bool IsFullHealth => !m_Dead && m_CurrentHealth.Value >= m_StartingHealth;
+
+        /// <summary>Restores health up to the starting maximum. Called on the server only.</summary>
+        public void Heal(float amount)
+        {
+            if (!IsServer || m_Dead)
+                return;
+
+            m_CurrentHealth.Value = Mathf.Min(m_StartingHealth, m_CurrentHealth.Value + amount);
+        }
+
         private void SetHealthUI(float currentHealth)
         {
             if (m_Slider != null)
