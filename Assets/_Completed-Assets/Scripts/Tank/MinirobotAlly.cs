@@ -1,18 +1,22 @@
-using System.Collections.Generic;
 using UnityEngine;
 
 namespace Complete
 {
     /// <summary>
-    /// Offline ally NPC with a two-state state machine.
+    /// Offline ally NPC — two-state state machine.
     ///
-    /// Patrolling: moves between a list of waypoints at PatrolSpeed.
-    /// Repairing:  stops and heals every damaged tank physically touching it
-    ///             at HealPerSecond HP/s (driven by OnTriggerStay).
+    /// Patrolling: moves between waypoints.
+    /// Repairing:  stops and heals tanks that physically touch it.
     ///
-    /// Transitions:
-    ///   Patrolling -> Repairing  when a damaged tank enters the trigger.
-    ///   Repairing  -> Patrolling when no damaged tanks remain in the trigger.
+    /// Detection uses Physics.OverlapSphere so no child trigger GameObject is needed.
+    /// Actual healing uses OnTriggerStay on a small contact trigger (same GO).
+    ///
+    /// Prefab collider setup (two colliders on the same GameObject):
+    ///   1. SphereCollider  isTrigger=false  radius~0.5  → solid body, tanks can't pass through.
+    ///   2. SphereCollider  isTrigger=true   radius~1.0  → contact zone, drives healing.
+    ///
+    /// The detection radius (m_DetectionRadius) is larger than the contact trigger and is
+    /// checked each frame via OverlapSphere — no additional collider required.
     /// </summary>
     [RequireComponent(typeof(Rigidbody))]
     public class MinirobotAlly : MonoBehaviour
@@ -20,9 +24,9 @@ namespace Complete
         // ── Inspector ──────────────────────────────────────────────────────────
 
         [Header("Waypoints")]
-        [Tooltip("World-space waypoints the robot patrols in order. " +
+        [Tooltip("GameObjects whose positions define the patrol route. " +
                  "If empty the robot stays in place.")]
-        public List<Transform> m_Waypoints = new List<Transform>();
+        public GameObject[] m_Waypoints = new GameObject[0];
 
         [Header("Movement")]
         [Tooltip("Speed while patrolling (units/s).")]
@@ -34,8 +38,17 @@ namespace Complete
         [Tooltip("Rotation speed while steering towards a waypoint (degrees/s).")]
         public float m_RotationSpeed = 120f;
 
+        [Header("Detection")]
+        [Tooltip("Radius within which the robot detects damaged tanks and stops patrolling. " +
+                 "Should be larger than the contact trigger radius.")]
+        public float m_DetectionRadius = 3f;
+
+        [Tooltip("LayerMask for the detection overlap. Should include the Players layer.")]
+        public LayerMask m_TankMask;
+
         [Header("Healing")]
-        [Tooltip("Health restored per second while a tank is in contact.")]
+        [Tooltip("Health restored per second while a tank is physically in contact " +
+                 "(inside the contact trigger collider).")]
         public float m_HealPerSecond = 2f;
 
         // ── State machine ──────────────────────────────────────────────────────
@@ -46,19 +59,15 @@ namespace Complete
 
         // ── Runtime ────────────────────────────────────────────────────────────
 
-        private Rigidbody m_Rigidbody;
         private int m_WaypointIndex;
-
-        /// <summary>Tanks currently overlapping the trigger collider.</summary>
-        private readonly HashSet<TankHealth> m_ContactTanks = new HashSet<TankHealth>();
 
         // ── Unity lifecycle ────────────────────────────────────────────────────
 
         private void Awake()
         {
-            m_Rigidbody = GetComponent<Rigidbody>();
-            // Position driven by script; physics only needed for trigger detection.
-            m_Rigidbody.isKinematic = true;
+            Rigidbody rb = GetComponent<Rigidbody>();
+            rb.isKinematic = true;
+            rb.useGravity  = false;
         }
 
         private void Update()
@@ -70,41 +79,28 @@ namespace Complete
             }
         }
 
-        private void OnTriggerEnter(Collider other)
-        {
-            TankHealth health = other.GetComponent<TankHealth>();
-            if (health == null)
-                return;
-
-            m_ContactTanks.Add(health);
-            EvaluateTransition();
-        }
-
-        private void OnTriggerExit(Collider other)
-        {
-            TankHealth health = other.GetComponent<TankHealth>();
-            if (health == null)
-                return;
-
-            m_ContactTanks.Remove(health);
-            EvaluateTransition();
-        }
-
         // ── State updates ──────────────────────────────────────────────────────
 
         private void UpdatePatrolling()
         {
-            if (m_Waypoints.Count == 0)
+            // Check whether a damaged tank is within detection range.
+            if (HasDamagedTankNearby())
+            {
+                TransitionTo(State.Repairing);
+                return;
+            }
+
+            if (m_Waypoints.Length == 0)
                 return;
 
-            Transform target = m_Waypoints[m_WaypointIndex];
-            if (target == null)
+            GameObject waypointObj = m_Waypoints[m_WaypointIndex];
+            if (waypointObj == null)
             {
                 AdvanceWaypoint();
                 return;
             }
 
-            Vector3 toTarget = target.position - transform.position;
+            Vector3 toTarget = waypointObj.transform.position - transform.position;
             toTarget.y = 0f;
 
             if (toTarget.sqrMagnitude > 0.001f)
@@ -122,16 +118,17 @@ namespace Complete
 
         private void UpdateRepairing()
         {
-            // Remove stale references (tank died/destroyed mid-repair).
-            m_ContactTanks.RemoveWhere(h => h == null);
-
-            // If no damaged tanks remain in contact, return to patrol.
-            if (!HasDamagedTankInContact())
+            // Resume patrol as soon as no damaged tank is in detection range.
+            if (!HasDamagedTankNearby())
                 TransitionTo(State.Patrolling);
         }
 
-        // ── Trigger stay (heal tick) ───────────────────────────────────────────
+        // ── Healing (contact trigger) ──────────────────────────────────────────
 
+        /// <summary>
+        /// Fires while a tank's collider overlaps the contact trigger (isTrigger=true)
+        /// on this GameObject. The robot must be in Repairing state.
+        /// </summary>
         private void OnTriggerStay(Collider other)
         {
             if (m_CurrentState != State.Repairing)
@@ -146,16 +143,17 @@ namespace Complete
 
         // ── Helpers ────────────────────────────────────────────────────────────
 
-        private void EvaluateTransition()
+        /// <summary>
+        /// Returns true if at least one damaged tank is within m_DetectionRadius.
+        /// Uses Physics.OverlapSphere so no separate trigger collider is needed for detection.
+        /// </summary>
+        private bool HasDamagedTankNearby()
         {
-            TransitionTo(HasDamagedTankInContact() ? State.Repairing : State.Patrolling);
-        }
-
-        private bool HasDamagedTankInContact()
-        {
-            foreach (TankHealth h in m_ContactTanks)
+            Collider[] hits = Physics.OverlapSphere(transform.position, m_DetectionRadius, m_TankMask);
+            foreach (Collider col in hits)
             {
-                if (h != null && !h.IsFullHealth)
+                TankHealth health = col.GetComponent<TankHealth>();
+                if (health != null && !health.IsFullHealth)
                     return true;
             }
             return false;
@@ -168,10 +166,10 @@ namespace Complete
 
         private void AdvanceWaypoint()
         {
-            if (m_Waypoints.Count == 0)
+            if (m_Waypoints.Length == 0)
                 return;
 
-            m_WaypointIndex = (m_WaypointIndex + 1) % m_Waypoints.Count;
+            m_WaypointIndex = (m_WaypointIndex + 1) % m_Waypoints.Length;
         }
     }
 }

@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using Unity.Netcode;
 using UnityEngine;
 
@@ -7,17 +6,17 @@ namespace Complete
     /// <summary>
     /// Online ally NPC — server-authoritative two-state state machine.
     ///
-    /// Patrolling: moves between waypoints on the server; position is
-    ///             replicated to clients via NetworkTransform.
-    /// Repairing:  stops and heals every damaged tank in contact at
-    ///             HealPerSecond HP/s via NetworkTankHealth.Heal().
+    /// Patrolling: moves between waypoints; NetworkTransform replicates position to clients.
+    /// Repairing:  stops and heals tanks that physically touch the contact trigger.
     ///
-    /// Transitions:
-    ///   Patrolling -> Repairing  when a damaged tank enters the trigger (server).
-    ///   Repairing  -> Patrolling when no damaged tanks remain in contact (server).
+    /// Detection uses Physics.OverlapSphere (server-side) — no child trigger needed.
+    /// Healing uses OnTriggerStay on a small contact trigger on this GameObject.
     ///
-    /// Requires a NetworkTransform component on the same GameObject so that
-    /// movement computed on the server is replicated to all clients.
+    /// Prefab collider setup (two colliders on the same GameObject):
+    ///   1. SphereCollider  isTrigger=false  radius~0.5  → solid body.
+    ///   2. SphereCollider  isTrigger=true   radius~1.0  → contact zone for healing.
+    ///
+    /// Also requires a NetworkTransform component on this GameObject.
     /// </summary>
     [RequireComponent(typeof(Rigidbody))]
     public class NetworkMinirobotAlly : NetworkBehaviour
@@ -25,9 +24,9 @@ namespace Complete
         // ── Inspector ──────────────────────────────────────────────────────────
 
         [Header("Waypoints")]
-        [Tooltip("World-space waypoints the robot patrols in order. " +
+        [Tooltip("GameObjects whose positions define the patrol route. " +
                  "If empty the robot stays in place.")]
-        public List<Transform> m_Waypoints = new List<Transform>();
+        public GameObject[] m_Waypoints = new GameObject[0];
 
         [Header("Movement")]
         [Tooltip("Speed while patrolling (units/s).")]
@@ -39,8 +38,17 @@ namespace Complete
         [Tooltip("Rotation speed while steering towards a waypoint (degrees/s).")]
         public float m_RotationSpeed = 120f;
 
+        [Header("Detection")]
+        [Tooltip("Radius within which the robot detects damaged tanks and stops patrolling. " +
+                 "Should be larger than the contact trigger radius.")]
+        public float m_DetectionRadius = 3f;
+
+        [Tooltip("LayerMask for the detection overlap. Should include the Players layer.")]
+        public LayerMask m_TankMask;
+
         [Header("Healing")]
-        [Tooltip("Health restored per second while a tank is in contact.")]
+        [Tooltip("Health restored per second while a tank is physically in contact " +
+                 "(inside the contact trigger collider).")]
         public float m_HealPerSecond = 2f;
 
         // ── State machine ──────────────────────────────────────────────────────
@@ -51,24 +59,19 @@ namespace Complete
 
         // ── Runtime ────────────────────────────────────────────────────────────
 
-        private Rigidbody m_Rigidbody;
         private int m_WaypointIndex;
 
-        /// <summary>Tanks currently overlapping the trigger collider (server-only).</summary>
-        private readonly HashSet<NetworkTankHealth> m_ContactTanks = new HashSet<NetworkTankHealth>();
-
-        // ── Unity / NGO lifecycle ──────────────────────────────────────────────
+        // ── Unity lifecycle ────────────────────────────────────────────────────
 
         private void Awake()
         {
-            m_Rigidbody = GetComponent<Rigidbody>();
-            // Position driven by script on the server; NetworkTransform replicates it.
-            m_Rigidbody.isKinematic = true;
+            Rigidbody rb = GetComponent<Rigidbody>();
+            rb.isKinematic = true;
+            rb.useGravity  = false;
         }
 
         private void Update()
         {
-            // Only the server runs movement and healing logic.
             if (!IsServer)
                 return;
 
@@ -79,59 +82,27 @@ namespace Complete
             }
         }
 
-        private void OnTriggerEnter(Collider other)
-        {
-            if (!IsServer)
-                return;
-
-            NetworkTankHealth health = other.GetComponent<NetworkTankHealth>();
-            if (health == null)
-                return;
-
-            m_ContactTanks.Add(health);
-            EvaluateTransition();
-        }
-
-        private void OnTriggerExit(Collider other)
-        {
-            if (!IsServer)
-                return;
-
-            NetworkTankHealth health = other.GetComponent<NetworkTankHealth>();
-            if (health == null)
-                return;
-
-            m_ContactTanks.Remove(health);
-            EvaluateTransition();
-        }
-
-        private void OnTriggerStay(Collider other)
-        {
-            if (!IsServer || m_CurrentState != State.Repairing)
-                return;
-
-            NetworkTankHealth health = other.GetComponent<NetworkTankHealth>();
-            if (health == null || health.IsFullHealth)
-                return;
-
-            health.Heal(m_HealPerSecond * Time.deltaTime);
-        }
-
         // ── State updates ──────────────────────────────────────────────────────
 
         private void UpdatePatrolling()
         {
-            if (m_Waypoints.Count == 0)
+            if (HasDamagedTankNearby())
+            {
+                TransitionTo(State.Repairing);
+                return;
+            }
+
+            if (m_Waypoints.Length == 0)
                 return;
 
-            Transform target = m_Waypoints[m_WaypointIndex];
-            if (target == null)
+            GameObject waypointObj = m_Waypoints[m_WaypointIndex];
+            if (waypointObj == null)
             {
                 AdvanceWaypoint();
                 return;
             }
 
-            Vector3 toTarget = target.position - transform.position;
+            Vector3 toTarget = waypointObj.transform.position - transform.position;
             toTarget.y = 0f;
 
             if (toTarget.sqrMagnitude > 0.001f)
@@ -149,25 +120,33 @@ namespace Complete
 
         private void UpdateRepairing()
         {
-            // Remove stale references (tank died and was despawned).
-            m_ContactTanks.RemoveWhere(h => h == null);
-
-            if (!HasDamagedTankInContact())
+            if (!HasDamagedTankNearby())
                 TransitionTo(State.Patrolling);
+        }
+
+        // ── Healing (contact trigger) ──────────────────────────────────────────
+
+        private void OnTriggerStay(Collider other)
+        {
+            if (!IsServer || m_CurrentState != State.Repairing)
+                return;
+
+            NetworkTankHealth health = other.GetComponent<NetworkTankHealth>();
+            if (health == null || health.IsFullHealth)
+                return;
+
+            health.Heal(m_HealPerSecond * Time.deltaTime);
         }
 
         // ── Helpers ────────────────────────────────────────────────────────────
 
-        private void EvaluateTransition()
+        private bool HasDamagedTankNearby()
         {
-            TransitionTo(HasDamagedTankInContact() ? State.Repairing : State.Patrolling);
-        }
-
-        private bool HasDamagedTankInContact()
-        {
-            foreach (NetworkTankHealth h in m_ContactTanks)
+            Collider[] hits = Physics.OverlapSphere(transform.position, m_DetectionRadius, m_TankMask);
+            foreach (Collider col in hits)
             {
-                if (h != null && !h.IsFullHealth)
+                NetworkTankHealth health = col.GetComponent<NetworkTankHealth>();
+                if (health != null && !health.IsFullHealth)
                     return true;
             }
             return false;
@@ -180,10 +159,10 @@ namespace Complete
 
         private void AdvanceWaypoint()
         {
-            if (m_Waypoints.Count == 0)
+            if (m_Waypoints.Length == 0)
                 return;
 
-            m_WaypointIndex = (m_WaypointIndex + 1) % m_Waypoints.Count;
+            m_WaypointIndex = (m_WaypointIndex + 1) % m_Waypoints.Length;
         }
     }
 }

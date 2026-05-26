@@ -3,14 +3,14 @@ using UnityEngine;
 namespace Complete
 {
     /// <summary>
-    /// Offline landmine. Explodes when any collider enters its trigger zone,
-    /// dealing a fixed amount of damage to nearby tanks (same explosion
-    /// radius/force as a shell) and playing the shared explosion effect.
+    /// Offline landmine. Explodes only when a tank enters its trigger zone.
+    /// Deals fixed damage to all tanks within the blast radius and plays the
+    /// shared shell explosion effect.
     /// </summary>
     public class LandmineExplosion : MonoBehaviour
     {
         [Header("Damage")]
-        [Tooltip("Fixed damage dealt to tanks caught in the blast.")]
+        [Tooltip("Fixed damage dealt to every tank caught in the blast.")]
         public float m_Damage = 40f;
 
         [Tooltip("LayerMask for tanks. Should be the 'Players' layer.")]
@@ -36,8 +36,10 @@ namespace Complete
             if (m_Exploded)
                 return;
 
-            // Any collider entering the trigger sets off the mine —
-            // the damage OverlapSphere then checks the TankMask.
+            // Only tanks detonate the mine — ignore the ground, rocks, etc.
+            if (other.GetComponent<TankHealth>() == null)
+                return;
+
             Explode();
         }
 

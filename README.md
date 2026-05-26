@@ -14,40 +14,39 @@ UI/
 - Arquitectura de red
 Relay sirve como intermediario: ningún dispositivo necesita abrir puertos ni IP pública
 Lobby almacena el join code dentro de sus datos públicos para que el cliente lo recupere
-El host es servidor autoritative; toda la física, el daño y el estado del juego viven en él
+El host es servidor autoritativo; toda la física, el daño y el estado del juego viven en él
 Los clientes solo envían input via ServerRpc y reciben estado via ClientRpc y NetworkVariable
 
-Pasos manuales necesarios en el editor
-1. Generar la escena del menú
-Desde el menú del editor: Tools > Tanks > Build Main Menu Scene. Esto crea Assets/Scenes/MainMenu.unity y la añade al Build Settings automáticamente.
+- Funciones scripts
+CameraControl — Mueve y escala la cámara ortográfica para mantener a todos los tanques asignados dentro del encuadre con un margen configurable.
 
-2. Configurar el Build Settings
-Ve a File > Build Settings y asegúrate de que el orden es:
+MainMenuController — Controla los paneles del menú principal y las transiciones entre juego local, matchmaking online y salida de la aplicación.
+UIDirectionControl — Mantiene la orientación constante de elementos UI en espacio mundo (como barras de vida) independientemente de la rotación del padre.
 
-Assets/Scenes/MainMenu.unity (índice 0)
-Assets/Scenes/_Complete-Game.unity (índice 1)
-3. Vincular Unity Gaming Services al proyecto
-Ve a Edit > Project Settings > Services y vincula tu proyecto de Unity Dashboard. Relay y Lobby requieren un Project ID activo. Crea el proyecto en dashboard.unity3d.com si aún no tienes uno.
+GameManager — Orquesta el bucle de juego offline: hace spawn de tanques, gestiona las rondas y muestra mensajes de victoria/empate.
+TankManager — Clase de datos ([Serializable], sin base class) que el GameManager usa para agrupar color, punto de spawn, estado de control y victorias de cada tanque.
+HeartSpawner — Genera corazones de vida de forma procedural en modo offline mediante una cuadrícula con jitter aleatorio y evitación de colisiones.
+LandmineSpawner — Misma lógica de spawn procedural que HeartSpawner pero para minas en modo offline.
 
-4. Crear el prefab de tanque de red
-Duplica tu prefab de tanque existente (CompleteTank) y llámalo NetworkTank. Sobre él:
+NetworkGameManager — Inicializa Unity Gaming Services y gestiona el ciclo de vida de sesiones online (Lobby + Relay).
+OnlineGameManager — Espejo en red de GameManager (hereda NetworkBehaviour): servidor autoritativo que coordina rondas, victorias y estado de UI replicados con NetworkVariable.
+OnlineColorApplier — Sincroniza y aplica el color de material de cada tanque a todos los clientes mediante un ClientRpc.
+NetworkTankMovement — El dueño envía su input al servidor vía ServerRpc; el servidor aplica la física de forma autoritativa y NetworkTransform replica la posición al resto.
+NetworkTankShooting — El dueño carga el disparo localmente y solicita al servidor que instancie el proyectil vía ServerRpc.
+NetworkTankHealth — Gestiona la salud del tanque en red con un NetworkVariable servidor-autoritativo y replica efectos de daño y muerte a todos los clientes.
+NetworkShellExplosion — Calcula y aplica daño radial y fuerzas de física a los tanques al impactar, de forma autoritativa en el servidor.
+NetworkHeartPickup — Pickup de vida en red: al colisionar con un tanque, lo cura y se despawnea (solo servidor).
+NetworkHeartSpawner — Versión online de HeartSpawner: spawn procedural de corazones en red, solo ejecuta lógica en el servidor.
+NetworkLandmineExplosion — Mina en red: detecta colisión con tanques, aplica daño y dispara el efecto de explosión en todos los clientes vía ClientRpc.
+NetworkLandmineSpawner — Versión online de LandmineSpawner: spawn procedural de minas en red, solo en servidor.
+NetworkMinirobotAlly — NPC en red servidor-autoritativo: patrulla waypoints y se detiene para reparar tanques dañados dentro de su radio.
 
-Añade NetworkObject (componente base de NGO; sin él no puede spawnearse en red)
-Sustituye TankMovement → NetworkTankMovement
-Sustituye TankShooting → NetworkTankShooting
-Sustituye TankHealth → NetworkTankHealth
-Añade OnlineColorApplier
-Registra el prefab en el NetworkManager (componente que deberás añadir a un GameObject en la escena del juego) en la lista Network Prefabs
-5. Configurar la escena _Complete-Game para el modo online
-Añade un GameObject vacío OnlineGameManager con el componente OnlineGameManager. Asígnale:
+ShellExplosion — Explosión offline: aplica daño radial y fuerzas de física a los tanques según su distancia al impacto.
+LandmineExplosion — Explosión offline de mina: aplica daño fijo a los tanques que la pisan y reproduce efectos visuales/sonoros.
 
-Referencia al CameraControl existente
-Referencia al Text de mensajes
-El prefab NetworkTank
-Los Transform de los spawn points
-6. Añadir el NetworkManager al proyecto
-En _Complete-Game, añade un GameObject NetworkManager con los componentes:
+TankMovement — Controla el movimiento y rotación local del tanque por input de jugador, gestionando audio de motor y partículas.
+TankShooting — Gestiona el disparo local: carga la fuerza de lanzamiento según la duración del input e instancia el prefab del proyectil.
+TankHealth — Gestiona la salud del tanque en modo offline: daño, curación y efectos de muerte.
+HeartPickup — Pickup de vida offline: restaura salud al tanque al contacto y notifica al spawner para que gestione el reemplazo.
+MinirobotAlly — NPC offline: patrulla una ruta de waypoints y cura tanques dañados que entren en su rango de detección y contacto.
 
-NetworkManager (del paquete NGO)
-UnityTransport (del paquete NGO)
-Activa Enable Scene Management en el NetworkManager

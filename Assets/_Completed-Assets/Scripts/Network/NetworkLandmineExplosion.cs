@@ -5,14 +5,13 @@ namespace Complete
 {
     /// <summary>
     /// Online landmine — server-authoritative.
-    /// When any collider enters the trigger the server deals damage to nearby
-    /// tanks via NetworkTankHealth and tells all clients to play the effect,
-    /// then despawns the mine.
+    /// Only tanks detonate the mine. The server deals damage via NetworkTankHealth,
+    /// tells all clients to play the effect, then despawns the NetworkObject.
     /// </summary>
     public class NetworkLandmineExplosion : NetworkBehaviour
     {
         [Header("Damage")]
-        [Tooltip("Fixed damage dealt to tanks caught in the blast.")]
+        [Tooltip("Fixed damage dealt to every tank caught in the blast.")]
         public float m_Damage = 40f;
 
         [Tooltip("LayerMask for tanks. Should be the 'Players' layer.")]
@@ -38,6 +37,10 @@ namespace Complete
             if (!IsServer || m_Exploded)
                 return;
 
+            // Only tanks detonate the mine — ignore the ground, rocks, etc.
+            if (other.GetComponent<NetworkTankHealth>() == null)
+                return;
+
             m_Exploded = true;
 
             Collider[] colliders = Physics.OverlapSphere(transform.position, m_ExplosionRadius, m_TankMask);
@@ -53,8 +56,6 @@ namespace Complete
             }
 
             ExplodeClientRpc(transform.position);
-
-            // Despawn after a short delay so the ClientRpc arrives before the object is gone.
             NetworkObject.Despawn(true);
         }
 
