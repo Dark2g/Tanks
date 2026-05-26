@@ -1,10 +1,12 @@
 - Arquitectura de red
+
 Relay sirve como intermediario: ningún dispositivo necesita abrir puertos ni IP pública
 Lobby almacena el join code dentro de sus datos públicos para que el cliente lo recupere
 El host es servidor autoritativo; toda la física, el daño y el estado del juego viven en él
 Los clientes solo envían input via ServerRpc y reciben estado via ClientRpc y NetworkVariable
 
 - Funciones scripts
+
 CameraControl — Mueve y escala la cámara ortográfica para mantener a todos los tanques asignados dentro del encuadre con un margen configurable.
 
 MainMenuController — Controla los paneles del menú principal y las transiciones entre juego local, matchmaking online y salida de la aplicación.
