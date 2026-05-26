@@ -1,16 +1,3 @@
-Network/
-    NetworkGameManager.cs       # Singleton persistente: UGS Auth + Relay + Lobby + NGO
-    NetworkTankMovement.cs      # Movimiento con ServerRpc (autoridad en servidor)
-    NetworkTankShooting.cs      # Disparo con ServerRpc, shell spawneado en servidor
-    NetworkTankHealth.cs        # Vida como NetworkVariable, daño server-authoritative
-    NetworkShellExplosion.cs    # Explosión: física y daño en servidor, VFX via ClientRpc
-    OnlineGameManager.cs        # Game loop online con NetworkVariables y RPC
-    OnlineColorApplier.cs       # Aplica color del tanque en todos los clientes
-
-UI/
-    MainMenuController.cs       # Lógica del menú: local / host / join / quit
-
-
 - Arquitectura de red
 Relay sirve como intermediario: ningún dispositivo necesita abrir puertos ni IP pública
 Lobby almacena el join code dentro de sus datos públicos para que el cliente lo recupere
