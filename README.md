@@ -10,8 +10,6 @@ Network/
 UI/
     MainMenuController.cs       # Lógica del menú: local / host / join / quit
 
-Editor/
-    MainMenuSceneBuilder.cs     # Herramienta de editor para generar la escena MainMenu
 
 - Arquitectura de red
 Relay sirve como intermediario: ningún dispositivo necesita abrir puertos ni IP pública
